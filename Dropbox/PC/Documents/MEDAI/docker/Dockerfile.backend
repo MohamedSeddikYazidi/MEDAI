@@ -1,0 +1,41 @@
+# MedAI Backend Dockerfile — optimisé
+FROM python:3.11-slim
+
+WORKDIR /app
+RUN pip install --no-cache-dir psycopg2-binary
+# Dépendances système
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pip à jour
+RUN pip install --upgrade pip setuptools wheel
+
+# ✅ PyTorch CPU-only d'abord (évite 4 GB de CUDA inutile)
+RUN pip install --no-cache-dir \
+    torch torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# Dépendances lourdes ML en premier (mieux cachées)
+RUN pip install --no-cache-dir \
+    transformers sentence-transformers \
+    scikit-learn xgboost lightgbm \
+    spacy pandas numpy scipy
+
+# Dépendances app
+COPY requirements.txt .
+RUN pip install --no-cache-dir \
+    --timeout=300 \
+    -r requirements.txt
+
+# Modèle spaCy
+RUN python -m spacy download en_core_web_sm || true
+
+# Code applicatif
+COPY . .
+
+RUN mkdir -p data/chromadb models/saved_models logs
+
+EXPOSE 8000
+
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

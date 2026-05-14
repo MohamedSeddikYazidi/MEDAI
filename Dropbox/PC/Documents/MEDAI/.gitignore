@@ -1,0 +1,55 @@
+# Environment
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+.Python
+venv/
+env/
+.venv/
+
+# ML Models
+models/saved_models/*.pkl
+models/saved_models/*.joblib
+models/saved_models/*.json
+models/saved_models/*.png
+
+# Data
+data/
+*.db
+*.sqlite3
+logs/
+
+# ChromaDB
+data/chromadb/
+
+# Node / Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.docker/
+
+# Coverage
+.coverage
+htmlcov/

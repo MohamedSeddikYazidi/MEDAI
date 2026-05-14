@@ -1,0 +1,12 @@
+{
+  "total_encounters": 101766,
+  "unique_patients": 71518,
+  "readmission_rate_30day": 11.16,
+  "readmission_rate_any": 46.09,
+  "avg_time_in_hospital": 4.4,
+  "avg_medications": 16.02,
+  "avg_procedures": 1.34,
+  "avg_lab_procedures": 43.1,
+  "emergency_admission_rate": 53.05,
+  "diabetes_med_rate": 77.0
+}
