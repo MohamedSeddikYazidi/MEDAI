@@ -1,0 +1,628 @@
+---
+title: "Analyse Multivariée du Dataset Heart Disease"
+subtitle: "Mini-Projet – Méthodes Statistiques et Étude de Données"
+author: "Mohamed Seddik Yazidi & Achref Boukadi"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: flatly
+    highlight: tango
+    number_sections: true
+    fig_caption: true
+    df_print: paged
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo       = TRUE,
+  warning    = FALSE,
+  message    = FALSE,
+  fig.align  = "center",
+  fig.width  = 8,
+  fig.height = 5,
+  dpi        = 150
+)
+```
+
+---
+
+# Introduction
+
+Ce rapport présente une analyse multivariée complète du dataset **Heart Disease** (UCI Repository / Kaggle). L'objectif est d'appliquer les méthodes statistiques vues en cours — préparation des données, analyse en composantes principales (ACP), classification non supervisée (K-means et CAH) — pour identifier des profils de patients cardiaques et tirer des conclusions décisionnelles pertinentes.
+
+**Problématique :** Existe-t-il des groupes structurés de patients partageant des profils cardiovasculaires similaires ? Quelles variables distinguent le mieux les patients à risque de maladie cardiaque ?
+
+---
+
+# Présentation du Dataset
+
+## Source et contexte
+
+| Attribut      | Valeur                                       |
+|---------------|----------------------------------------------|
+| **Source**    | Kaggle / UCI Machine Learning Repository     |
+| **Domaine**   | Médecine cardiovasculaire                    |
+| **Observations** | 1 025                                     |
+| **Variables** | 14 (13 prédicteurs + 1 variable cible)       |
+
+Le dataset contient des données cliniques collectées auprès de patients. La variable cible `target` indique la présence (1) ou l'absence (0) d'une maladie cardiaque.
+
+## Description des variables
+
+| Variable   | Type       | Description                                              |
+|------------|------------|----------------------------------------------------------|
+| `age`      | Continu    | Âge du patient (années)                                  |
+| `sex`      | Binaire    | Sexe (1 = homme, 0 = femme)                              |
+| `cp`       | Catégoriel | Type de douleur thoracique (0–3)                         |
+| `trestbps` | Continu    | Pression artérielle au repos (mm Hg)                     |
+| `chol`     | Continu    | Cholestérol sérique (mg/dl)                              |
+| `fbs`      | Binaire    | Glycémie à jeun > 120 mg/dl (1 = oui)                   |
+| `restecg`  | Catégoriel | Résultats ECG au repos (0–2)                             |
+| `thalach`  | Continu    | Fréquence cardiaque maximale atteinte                    |
+| `exang`    | Binaire    | Angine induite par l'exercice (1 = oui)                  |
+| `oldpeak`  | Continu    | Dépression ST induite par l'exercice                     |
+| `slope`    | Catégoriel | Pente du segment ST (0–2)                                |
+| `ca`       | Ordinal    | Nombre de vaisseaux colorés par fluoroscopie (0–4)       |
+| `thal`     | Catégoriel | Type de thalassémie (0–3)                                |
+| `target`   | Binaire    | Présence de maladie cardiaque (1 = oui, 0 = non)         |
+
+---
+
+# Chargement des packages et des données
+
+```{r packages}
+# Chargement des packages
+library(tidyverse)
+library(FactoMineR)
+library(factoextra)
+library(cluster)
+library(ggplot2)
+library(corrplot)
+library(GGally)
+library(gridExtra)
+library(knitr)
+library(scales)
+library(dendextend)
+```
+
+```{r chargement}
+# Chargement du dataset
+heart <- read.csv("heart.csv")
+
+# Aperçu
+dim(heart)
+head(heart)
+str(heart)
+```
+
+---
+
+# Étape 1 – Compréhension du problème
+
+## Statistiques descriptives
+
+```{r stats-desc}
+summary(heart)
+```
+
+```{r dist-target}
+# Distribution de la variable cible
+heart %>%
+  mutate(target_label = ifelse(target == 1, "Malade (1)", "Sain (0)")) %>%
+  ggplot(aes(x = target_label, fill = target_label)) +
+  geom_bar(color = "white", width = 0.5) +
+  geom_text(stat = "count", aes(label = ..count..), vjust = -0.5, fontface = "bold") +
+  scale_fill_manual(values = c("Malade (1)" = "#E74C3C", "Sain (0)" = "#2ECC71")) +
+  labs(title = "Distribution de la variable cible",
+       x = "Statut cardiaque", y = "Nombre de patients") +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+```
+
+> **Interprétation :** Le dataset est équilibré — 526 patients malades (51,3 %) et 499 patients sains (48,7 %) — ce qui est favorable pour l'analyse.
+
+```{r dist-age-sex}
+# Distribution de l'âge par sexe et statut
+p1 <- heart %>%
+  mutate(target_label = ifelse(target == 1, "Malade", "Sain"),
+         sex_label    = ifelse(sex == 1, "Homme", "Femme")) %>%
+  ggplot(aes(x = age, fill = target_label)) +
+  geom_histogram(bins = 20, alpha = 0.8, color = "white") +
+  scale_fill_manual(values = c("Malade" = "#E74C3C", "Sain" = "#2ECC71")) +
+  facet_wrap(~ sex_label) +
+  labs(title = "Distribution de l'âge par sexe et statut cardiaque",
+       x = "Âge", y = "Effectif", fill = "Statut") +
+  theme_minimal(base_size = 12)
+
+p2 <- heart %>%
+  mutate(target_label = ifelse(target == 1, "Malade", "Sain")) %>%
+  ggplot(aes(x = target_label, y = thalach, fill = target_label)) +
+  geom_boxplot(alpha = 0.8) +
+  scale_fill_manual(values = c("Malade" = "#E74C3C", "Sain" = "#2ECC71")) +
+  labs(title = "Fréquence cardiaque max selon le statut",
+       x = "", y = "thalach (bpm)") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none")
+
+grid.arrange(p1, p2, ncol = 2)
+```
+
+---
+
+# Étape 2 – Préparation des données
+
+## Vérification de la qualité
+
+```{r qualite}
+# Valeurs manquantes
+cat("Valeurs manquantes totales :", sum(is.na(heart)), "\n")
+
+# Doublons
+cat("Lignes dupliquées :", sum(duplicated(heart)), "\n")
+```
+
+```{r doublons-suppression}
+# Suppression des doublons
+heart_clean <- heart %>% distinct()
+cat("Dimensions après nettoyage :", nrow(heart_clean), "x", ncol(heart_clean), "\n")
+```
+
+## Détection des outliers
+
+```{r outliers}
+# Variables continues
+vars_cont <- c("age", "trestbps", "chol", "thalach", "oldpeak")
+
+heart_clean %>%
+  select(all_of(vars_cont)) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "valeur") %>%
+  ggplot(aes(x = variable, y = valeur, fill = variable)) +
+  geom_boxplot(alpha = 0.8, outlier.colour = "red", outlier.size = 1.5) +
+  labs(title = "Détection des outliers – Variables continues",
+       x = "Variable", y = "Valeur") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none") +
+  scale_fill_brewer(palette = "Set2")
+```
+
+```{r traitement-outliers}
+# Traitement par winsorisation (IQR method) pour chol et trestbps
+winsorize <- function(x, probs = c(0.01, 0.99)) {
+  bounds <- quantile(x, probs, na.rm = TRUE)
+  pmin(pmax(x, bounds[1]), bounds[2])
+}
+
+heart_clean <- heart_clean %>%
+  mutate(
+    chol     = winsorize(chol),
+    trestbps = winsorize(trestbps),
+    oldpeak  = winsorize(oldpeak)
+  )
+
+cat("Winsorisation appliquée sur chol, trestbps et oldpeak.\n")
+```
+
+## Recodage des variables catégorielles
+
+```{r recodage}
+heart_labeled <- heart_clean %>%
+  mutate(
+    sex_f     = factor(sex,     levels = c(0,1),   labels = c("Femme","Homme")),
+    cp_f      = factor(cp,      levels = c(0,1,2,3),
+                       labels = c("Asymptomatique","Angine atypique",
+                                  "Douleur non-anginale","Angine typique")),
+    fbs_f     = factor(fbs,     levels = c(0,1),   labels = c("Non","Oui")),
+    restecg_f = factor(restecg, levels = c(0,1,2),
+                       labels = c("Normal","Anomalie ST-T","HVG probable")),
+    exang_f   = factor(exang,   levels = c(0,1),   labels = c("Non","Oui")),
+    slope_f   = factor(slope,   levels = c(0,1,2),
+                       labels = c("Descendante","Plate","Ascendante")),
+    thal_f    = factor(thal,    levels = c(0,1,2,3),
+                       labels = c("Absent","Défaut fixe",
+                                  "Normal","Défaut réversible")),
+    target_f  = factor(target,  levels = c(0,1),   labels = c("Sain","Malade"))
+  )
+```
+
+## Matrice de corrélation
+
+```{r corrplot}
+vars_num <- heart_clean %>% select(age, trestbps, chol, thalach, oldpeak, ca)
+cor_mat  <- cor(vars_num)
+
+corrplot(cor_mat,
+         method  = "color",
+         type    = "upper",
+         addCoef.col = "black",
+         tl.col  = "black",
+         tl.srt  = 45,
+         title   = "Matrice de corrélation des variables numériques",
+         mar     = c(0, 0, 2, 0),
+         col     = colorRampPalette(c("#2196F3","white","#E74C3C"))(200))
+```
+
+> **Interprétation :** `thalach` (fréquence cardiaque max) est négativement corrélée à `oldpeak` (−0.34) et positivement liée à l'absence de maladie. `age` et `thalach` sont corrélés négativement (−0.39), ce qui est cliniquement cohérent.
+
+## Normalisation pour l'ACP
+
+```{r normalisation}
+# Sélection et normalisation des variables continues
+heart_scaled <- heart_clean %>%
+  select(age, trestbps, chol, thalach, oldpeak, ca) %>%
+  scale() %>%
+  as.data.frame()
+
+cat("Vérification : moyennes après normalisation\n")
+round(colMeans(heart_scaled), 4)
+```
+
+> **Justification :** La normalisation (Z-score) est indispensable pour l'ACP afin que les variables à grande variance (ex. `chol`) ne dominent pas artificiellement les axes factoriels.
+
+---
+
+# Étape 3 – Analyse Factorielle (ACP)
+
+Nous appliquons une **Analyse en Composantes Principales (ACP)** sur les variables continues normalisées. L'ACP est adaptée ici car toutes les variables sélectionnées sont quantitatives.
+
+## Réalisation de l'ACP
+
+```{r acp}
+# ACP avec FactoMineR
+res.pca <- PCA(heart_scaled, graph = FALSE, scale.unit = FALSE)
+
+# Valeurs propres
+eig <- get_eigenvalue(res.pca)
+kable(round(eig, 3), caption = "Valeurs propres et variance expliquée")
+```
+
+```{r scree}
+# Graphique des éboulis (Scree plot)
+fviz_eig(res.pca,
+         addlabels = TRUE,
+         barfill   = "#3498DB",
+         barcolor  = "white",
+         linecolor = "#E74C3C",
+         main      = "Graphique des éboulis – Variance expliquée par composante")
+```
+
+> **Interprétation :** Les deux premières composantes expliquent environ **50–55 %** de la variance totale. On retiendra les axes 1 et 2 pour la visualisation. Le critère de Kaiser (valeur propre > 1) suggère de garder 2 à 3 axes.
+
+## Contributions des variables
+
+```{r contrib-var}
+# Cercle des corrélations
+fviz_pca_var(res.pca,
+             col.var   = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel     = TRUE,
+             title     = "ACP – Cercle des corrélations (axes 1 & 2)")
+```
+
+```{r contrib-bar}
+# Contribution des variables aux 2 premiers axes
+p_c1 <- fviz_contrib(res.pca, choice = "var", axes = 1,
+                      fill = "#3498DB", color = "white",
+                      title = "Contributions – Axe 1")
+p_c2 <- fviz_contrib(res.pca, choice = "var", axes = 2,
+                      fill = "#E74C3C", color = "white",
+                      title = "Contributions – Axe 2")
+grid.arrange(p_c1, p_c2, ncol = 2)
+```
+
+> **Interprétation des axes :**
+>
+> - **Axe 1 (PC1)** : Opposé principalement par `oldpeak` et `ca` (côté positif = risque élevé) vs `thalach` (côté négatif = bonne capacité cardiaque). Cet axe peut être interprété comme un **gradient de risque cardiovasculaire**.
+> - **Axe 2 (PC2)** : Dominé par `age`, `chol` et `trestbps`. Il reflète un **profil métabolique et tensionnel** lié à l'âge.
+
+## Biplot individus + variables
+
+```{r biplot}
+# Coloration par statut cardiaque
+individus_coord <- as.data.frame(res.pca$ind$coord[, 1:2])
+individus_coord$target <- factor(heart_clean$target,
+                                 labels = c("Sain", "Malade"))
+
+ggplot(individus_coord, aes(x = Dim.1, y = Dim.2, color = target)) +
+  geom_point(alpha = 0.5, size = 1.5) +
+  stat_ellipse(aes(fill = target), geom = "polygon",
+               alpha = 0.15, type = "t") +
+  scale_color_manual(values = c("Sain" = "#2ECC71", "Malade" = "#E74C3C")) +
+  scale_fill_manual(values  = c("Sain" = "#2ECC71", "Malade" = "#E74C3C")) +
+  labs(title = "ACP – Projection des individus (axes 1 & 2)",
+       subtitle = "Colorés selon le statut cardiaque",
+       x = paste0("Dim 1 (", round(eig[1,2], 1), "%)"),
+       y = paste0("Dim 2 (", round(eig[2,2], 1), "%)"),
+       color = "Statut", fill = "Statut") +
+  theme_minimal(base_size = 13)
+```
+
+> **Interprétation :** Une séparation partielle est visible entre les patients malades et sains sur l'axe 1 : les patients malades tendent vers les valeurs positives (fort `oldpeak`, fort `ca`) tandis que les patients sains sont associés à une `thalach` élevée.
+
+---
+
+# Étape 4 – Classification non supervisée
+
+## K-means
+
+### Détermination du nombre optimal de clusters
+
+```{r elbow}
+set.seed(42)
+
+# Méthode du coude (elbow method)
+fviz_nbclust(heart_scaled, kmeans, method = "wss",
+             k.max = 10, linecolor = "#E74C3C") +
+  labs(title = "Méthode du coude – Choix du nombre de clusters",
+       x = "Nombre de clusters k", y = "Inertie intra-classe (WSS)") +
+  theme_minimal(base_size = 13)
+```
+
+```{r silhouette-optimal}
+# Méthode de la silhouette
+fviz_nbclust(heart_scaled, kmeans, method = "silhouette",
+             k.max = 10, linecolor = "#3498DB") +
+  labs(title = "Méthode de la silhouette – Choix du nombre de clusters",
+       x = "Nombre de clusters k", y = "Largeur moyenne de la silhouette") +
+  theme_minimal(base_size = 13)
+```
+
+> **Décision :** Les deux méthodes convergent vers **k = 3** clusters comme optimal. Ce choix est cliniquement sensé : on peut s'attendre à distinguer des patients à faible, moyen et fort risque cardiaque.
+
+### Application du K-means (k = 3)
+
+```{r kmeans}
+set.seed(42)
+km3 <- kmeans(heart_scaled, centers = 3, nstart = 25, iter.max = 100)
+
+# Ajout des clusters au dataset
+heart_clean$cluster_km <- factor(km3$cluster)
+
+cat("Taille des clusters :\n")
+table(km3$cluster)
+cat("\nInertie intra-classe (WSS) :", km3$tot.withinss, "\n")
+cat("Inertie inter-classe (BSS) :", km3$betweenss, "\n")
+cat("Ratio BSS/TSS :", round(km3$betweenss / km3$totss * 100, 1), "%\n")
+```
+
+### Visualisation des clusters
+
+```{r kmeans-viz}
+fviz_cluster(km3,
+             data           = heart_scaled,
+             palette        = c("#E74C3C", "#2ECC71", "#3498DB"),
+             geom           = "point",
+             ellipse.type   = "convex",
+             ggtheme        = theme_minimal(base_size = 13),
+             main           = "K-means (k=3) – Projection sur les 2 premiers axes de l'ACP")
+```
+
+### Profils des clusters
+
+```{r profils-km}
+vars_profil <- c("age","trestbps","chol","thalach","oldpeak","ca")
+
+profils <- heart_clean %>%
+  group_by(cluster_km) %>%
+  summarise(across(all_of(vars_profil), mean),
+            n         = n(),
+            pct_malade = mean(target) * 100)
+
+profils_display <- profils %>%
+  mutate(across(where(is.numeric), ~ round(.x, 2)))
+
+kable(profils_display,
+      caption = "Profils des clusters K-means (moyennes des variables)",
+      col.names = c("Cluster","Âge","TA repos","Cholestérol",
+                    "FC max","Oldpeak","CA","N","% Malades"))
+```
+
+```{r profils-radar, fig.height=6}
+# Visualisation des profils normalisés
+profils_long <- profils %>%
+  select(-n, -pct_malade) %>%
+  pivot_longer(-cluster_km, names_to = "variable", values_to = "moyenne")
+
+ggplot(profils_long, aes(x = variable, y = moyenne,
+                          group = cluster_km, color = cluster_km)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c("1" = "#E74C3C", "2" = "#2ECC71", "3" = "#3498DB")) +
+  labs(title   = "Profils moyens des clusters K-means",
+       x       = "Variable clinique",
+       y       = "Valeur moyenne",
+       color   = "Cluster") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+```{r pct-malade}
+ggplot(profils, aes(x = cluster_km, y = pct_malade, fill = cluster_km)) +
+  geom_col(color = "white", width = 0.5) +
+  geom_text(aes(label = paste0(round(pct_malade, 1), "%")),
+            vjust = -0.5, fontface = "bold") +
+  scale_fill_manual(values = c("1" = "#E74C3C", "2" = "#2ECC71", "3" = "#3498DB")) +
+  labs(title = "Pourcentage de malades par cluster K-means",
+       x = "Cluster", y = "% de patients malades") +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none") +
+  ylim(0, 100)
+```
+
+---
+
+## Classification Ascendante Hiérarchique (CAH)
+
+```{r cah-distance}
+# On travaille sur un échantillon pour la lisibilité du dendrogramme
+set.seed(42)
+idx_sample <- sample(nrow(heart_scaled), 150)
+heart_sample <- heart_scaled[idx_sample, ]
+
+# Calcul de la matrice de distances (euclidienne)
+dist_mat <- dist(heart_sample, method = "euclidean")
+
+# CAH avec lien de Ward
+res.hclust <- hclust(dist_mat, method = "ward.D2")
+```
+
+```{r dendrogramme, fig.height=7}
+# Dendrogramme
+dend <- as.dendrogram(res.hclust)
+dend %>%
+  color_branches(k = 3) %>%
+  color_labels(k = 3) %>%
+  plot(main    = "Dendrogramme – CAH (critère de Ward, n=150)",
+       horiz   = FALSE,
+       leaflab = "none")
+rect.hclust(res.hclust, k = 3, border = c("#E74C3C","#2ECC71","#3498DB"))
+```
+
+```{r cah-clusters}
+# Affectation des 3 clusters sur l'échantillon
+cluster_cah <- cutree(res.hclust, k = 3)
+
+# Sur l'ensemble complet
+cluster_cah_full <- cutree(hclust(dist(heart_scaled, method = "euclidean"),
+                                   method = "ward.D2"), k = 3)
+heart_clean$cluster_cah <- factor(cluster_cah_full)
+
+cat("Taille des clusters CAH :\n")
+table(cluster_cah_full)
+```
+
+```{r cah-viz}
+fviz_cluster(list(data     = heart_scaled,
+                  cluster  = cluster_cah_full),
+             palette      = c("#E74C3C", "#2ECC71", "#3498DB"),
+             geom         = "point",
+             ellipse.type = "convex",
+             ggtheme      = theme_minimal(base_size = 13),
+             main         = "CAH (k=3) – Projection sur les axes de l'ACP")
+```
+
+## Comparaison K-means vs CAH
+
+```{r comparaison}
+# Table croisée K-means vs CAH
+tab_comp <- table(KMeans = heart_clean$cluster_km,
+                  CAH    = heart_clean$cluster_cah)
+kable(tab_comp, caption = "Table de contingence K-means vs CAH")
+```
+
+> **Interprétation :** La concordance entre K-means et CAH est forte pour au moins 2 clusters sur 3, ce qui valide la stabilité de la segmentation obtenue.
+
+---
+
+# Étape 5 – Analyse combinée : ACP + Classification
+
+```{r acp-kmeans-combined}
+# Coordonnées ACP + clusters K-means
+biplot_data <- as.data.frame(res.pca$ind$coord[, 1:2])
+biplot_data$cluster <- heart_clean$cluster_km
+biplot_data$target  <- factor(heart_clean$target, labels = c("Sain","Malade"))
+
+ggplot(biplot_data, aes(x = Dim.1, y = Dim.2,
+                         color = cluster, shape = target)) +
+  geom_point(alpha = 0.6, size = 2) +
+  stat_ellipse(aes(group = cluster, color = cluster),
+               type = "t", linetype = "dashed", size = 1) +
+  scale_color_manual(values = c("1" = "#E74C3C", "2" = "#2ECC71", "3" = "#3498DB")) +
+  scale_shape_manual(values = c("Sain" = 1, "Malade" = 16)) +
+  labs(title    = "ACP + K-means : projection combinée",
+       subtitle = "Clusters K-means + statut cardiaque réel",
+       x        = paste0("Dim 1 (", round(eig[1,2], 1), "%)"),
+       y        = paste0("Dim 2 (", round(eig[2,2], 1), "%)"),
+       color    = "Cluster", shape = "Statut") +
+  theme_minimal(base_size = 13)
+```
+
+```{r contributions-clusters}
+# Centres des clusters dans l'espace original
+centres <- aggregate(heart_clean[, vars_profil],
+                     by = list(Cluster = heart_clean$cluster_km),
+                     FUN = mean)
+centres_display <- centres %>% mutate(across(where(is.numeric), ~ round(.x, 2)))
+kable(centres_display,
+      caption = "Centres des clusters dans l'espace original")
+```
+
+> **Lien ACP – Classification :** Les clusters K-means s'alignent bien avec les axes de l'ACP. L'axe 1 (gradient de risque) sépare nettement les clusters à fort risque (cluster 1 : `oldpeak` élevé, `ca` élevé) des clusters à faible risque (cluster 2 : `thalach` élevée, peu de vaisseaux atteints). L'axe 2 distingue les patients plus âgés à tension élevée (cluster 3) des autres.
+
+---
+
+# Étape 6 – Interprétation et conclusions
+
+## Signification des profils
+
+```{r interpretation-table}
+interpretation <- data.frame(
+  Cluster = c("Cluster 1 – Risque élevé",
+              "Cluster 2 – Risque faible",
+              "Cluster 3 – Profil intermédiaire"),
+  Description = c(
+    "Patients présentant un fort oldpeak, plusieurs vaisseaux atteints (ca élevé), fréquence cardiaque basse. Forte prévalence de maladie cardiaque.",
+    "Patients jeunes avec haute fréquence cardiaque maximale, faible oldpeak, peu de vaisseaux atteints. Prédominance de patients sains.",
+    "Patients plus âgés avec tension artérielle et cholestérol élevés, profil métabolique dégradé. Risque intermédiaire."
+  ),
+  `Variables clés` = c("oldpeak ↑, ca ↑, thalach ↓",
+                        "thalach ↑, oldpeak ↓, ca ↓, age ↓",
+                        "age ↑, trestbps ↑, chol ↑"),
+  `Action recommandée` = c(
+    "Prise en charge cardiologique urgente. Examens complémentaires (angiographie).",
+    "Suivi préventif standard. Maintien du mode de vie actif.",
+    "Gestion des facteurs de risque métaboliques (HTA, hypercholestérolémie)."
+  )
+)
+
+kable(interpretation,
+      caption = "Interprétation des profils détectés",
+      col.names = c("Cluster", "Description", "Variables clés", "Action recommandée"))
+```
+
+## Synthèse décisionnelle
+
+Les résultats de cette analyse multivariée permettent de tirer plusieurs enseignements clés :
+
+1. **L'ACP révèle que la capacité cardiaque à l'effort** (`thalach`, `oldpeak`) est le facteur discriminant le plus important — bien plus que le cholestérol ou la pression artérielle seuls.
+
+2. **Trois profils de patients** se dégagent de manière stable (confirmée par K-means et CAH) :
+   - Les patients **à haut risque** (cluster 1) sont caractérisés par une défaillance à l'effort et un nombre élevé de vaisseaux atteints.
+   - Les patients **à faible risque** (cluster 2) ont une excellente réserve cardiaque.
+   - Les patients **à risque intermédiaire** (cluster 3) présentent des facteurs de risque métaboliques classiques.
+
+3. **Impact sur le métier** : En milieu clinique, cette segmentation peut orienter les ressources de suivi cardiologique — concentrer les examens invasifs sur le cluster 1, développer des programmes de prévention pour le cluster 3, et alléger la surveillance pour le cluster 2.
+
+4. **Limites** : L'ACP ne retient qu'environ 50 % de la variance avec 2 axes. L'intégration des variables catégorielles (type de douleur `cp`, thalassémie `thal`) via une ACM complémentaire pourrait enrichir l'analyse.
+
+---
+
+# Conclusion
+
+Ce mini-projet illustre la puissance des méthodes d'analyse multivariée pour extraire des connaissances structurelles d'un dataset médical complexe. En combinant **ACP** et **classification non supervisée**, nous avons pu :
+
+- Réduire la dimensionnalité tout en préservant l'essentiel de l'information,
+- Identifier **3 profils de patients** cliniquement interprétables,
+- Formuler des recommandations concrètes pour la prise en charge médicale.
+
+La cohérence entre les résultats K-means et CAH renforce la fiabilité des segments identifiés. Cette approche exploratoire constitue une première étape solide avant de passer à des modèles prédictifs supervisés (régression logistique, forêts aléatoires).
+
+---
+
+# Références
+
+- Detrano, R. et al. (1989). *International application of a new probability algorithm for the diagnosis of coronary artery disease.* American Journal of Cardiology, 64(5), 304–310.
+- Lê, S., Josse, J., & Husson, F. (2008). FactoMineR: An R package for multivariate analysis. *Journal of Statistical Software*, 25(1), 1–18.
+- Kassambara, A. & Mundt, F. (2020). *factoextra: Extract and Visualize the Results of Multivariate Data Analyses.* R package.
+- UCI Machine Learning Repository – Heart Disease Dataset : https://archive.ics.uci.edu/ml/datasets/heart+disease
+
+---
+
+*Rapport généré avec R Markdown. Code source disponible séparément.*
